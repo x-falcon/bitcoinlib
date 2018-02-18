@@ -2556,7 +2556,8 @@ class HDWallet:
         :return str, list: Transaction ID or result array 
         """
 
-        outputs = [(to_address, amount)]
+        network, _, _ = self._get_account_defaults(network, account_id)
+        outputs = [Output(amount, to_address, network=network)]
         return self.send(outputs, account_id=account_id, network=network, transaction_fee=transaction_fee,
                          min_confirms=min_confirms, priv_keys=priv_keys, offline=offline)
 
