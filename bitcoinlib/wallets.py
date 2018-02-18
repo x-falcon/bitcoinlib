@@ -2467,17 +2467,17 @@ class HDWallet:
         t_import = Transaction.import_raw(raw_tx, network=self.network.network_name)
         return self.transaction_create(t_import.outputs, t_import.inputs, transaction_fee=False)
 
-    def send(self, output_arr, input_arr=None, account_id=None, network=None, transaction_fee=None, min_confirms=4,
+    def send(self, outputs, inputs=None, account_id=None, network=None, transaction_fee=None, min_confirms=4,
              priv_keys=None, max_utxos=None, offline=False):
         """
         Create new transaction with specified outputs and push it to the network. 
         Inputs can be specified but if not provided they will be selected from wallets utxo's.
-        Output array is a list of 1 or more addresses and amounts.
+        Output array is a list of 1 or more Output objects with addresses and amounts.
         
-        :param output_arr: List of output tuples with address and amount. Must contain at least one item. Example: [('mxdLD8SAGS9fe2EeCXALDHcdTTbppMHp8N', 5000000)] 
-        :type output_arr: list 
-        :param input_arr: List of inputs tuples with reference to a UTXO, a wallet key and value. The format is [(tx_hash, output_n, key_id, value)]
-        :type input_arr: list
+        :param outputs: List of Output objects with address and amount. Must contain at least one item.
+        :type outputs: list
+        :param inputs: List of Inputs object with reference to a UTXO, a wallet key and value. Leave empty to select inputs from available unspent outputs in this wallet
+        :type inputs: list
         :param account_id: Account ID
         :type account_id: int
         :param network: Network name. Leave empty for default network
@@ -2496,11 +2496,11 @@ class HDWallet:
         :return str, list: Transaction ID or result array
         """
 
-        if input_arr and max_utxos and len(input_arr) > max_utxos:
+        if inputs and max_utxos and len(inputs) > max_utxos:
             raise WalletError("Input array contains %d UTXO's but max_utxos=%d parameter specified" %
-                              (len(input_arr), max_utxos))
+                              (len(inputs), max_utxos))
 
-        transaction = self.transaction_create(output_arr, input_arr, account_id, network, transaction_fee,
+        transaction = self.transaction_create(outputs, inputs, account_id, network, transaction_fee,
                                               min_confirms, max_utxos)
         transaction.sign(priv_keys)
         # Calculate exact estimated fees and update change output if necessary
@@ -2510,7 +2510,7 @@ class HDWallet:
             if fee_exact and abs((transaction.fee - fee_exact) / float(fee_exact)) > 0.10:
                 _logger.info("Transaction fee not correctly estimated (est.: %d, real: %d). "
                              "Recreate transaction with correct fee" % (transaction.fee, fee_exact))
-                transaction = self.transaction_create(output_arr, input_arr, account_id, network, fee_exact,
+                transaction = self.transaction_create(outputs, inputs, account_id, network, fee_exact,
                                                       min_confirms, max_utxos)
                 transaction.sign(priv_keys)
 
