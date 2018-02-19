@@ -435,6 +435,22 @@ class HDWalletKey:
         }
 
 
+class HDWalletTransactionInput(Input):
+
+    def __init__(self, key_id, index_n, *args, **kwargs):
+        self.key_id = key_id
+        self.index_n = index_n
+        super(HDWalletTransactionInput, self).__init__(*args, **kwargs)
+
+
+class HDWalletTransactionOutput(Output):
+
+    def __init__(self, key_id, index_n, *args, **kwargs):
+        self.key_id = key_id
+        self.index_n = index_n
+        super(HDWalletTransactionOutput, self).__init__(*args, **kwargs)
+
+
 class HDWalletTransaction(Transaction):
     """
     Normally only used as attribute of HDWallet class. Child of Transaction object with extra reference to
@@ -2300,17 +2316,17 @@ class HDWallet:
             return []
         return selected_utxos
 
-    def transaction_create(self, output_arr, input_arr=None, account_id=None, network=None, transaction_fee=None,
+    def transaction_create(self, outputs, inputs=None, account_id=None, network=None, transaction_fee=None,
                            min_confirms=1, max_utxos=None):
         """
-            Create new transaction with specified outputs. 
+            Create new transaction with specified outputs and push it to the network.
             Inputs can be specified but if not provided they will be selected from wallets utxo's.
-            Output array is a list of 1 or more addresses and amounts.
+            Output array is a list of 1 or more Output objects with addresses and amounts.
 
-            :param output_arr: List of output tuples with address and amount. Must contain at least one item. Example: [('mxdLD8SAGS9fe2EeCXALDHcdTTbppMHp8N', 5000000)] 
-            :type output_arr: list 
-            :param input_arr: List of inputs tuples with reference to a UTXO, a wallet key and value. The format is [(tx_hash, output_n, key_ids, value, signatures, unlocking_script)]
-            :type input_arr: list
+            :param outputs: List of Output objects with address and amount. Must contain at least one item.
+            :type outputs: list
+            :param inputs: List of Inputs object with reference to a UTXO, a wallet key and value. Leave empty to select inputs from available unspent outputs in this wallet
+            :type inputs: list
             :param account_id: Account ID
             :type account_id: int
             :param network: Network name. Leave empty for default network
@@ -2325,34 +2341,32 @@ class HDWallet:
             :return Transaction: object
         """
 
-        # TODO: Add transaction_id as possible input in input_arr
         amount_total_output = 0
         network, account_id, acckey = self._get_account_defaults(network, account_id)
 
-        if input_arr and max_utxos and len(input_arr) > max_utxos:
+        if inputs and max_utxos and len(inputs) > max_utxos:
             raise WalletError("Input array contains %d UTXO's but max_utxos=%d parameter specified" %
-                              (len(input_arr), max_utxos))
+                              (len(inputs), max_utxos))
         # Create transaction and add outputs
         transaction = HDWalletTransaction(hdwallet=self, network=network)
-        if not isinstance(output_arr, list):
-            raise WalletError("Output array must be a list of tuples with address and amount. "
-                              "Use 'send_to' method to send to one address")
-        for o in output_arr:
+        if not isinstance(outputs, list):
+            raise WalletError("Output array must be a list of Output objects")
+        for o in outputs:
             if isinstance(o, Output):
                 transaction.outputs.append(o)
                 amount_total_output += o.value
             else:
-                amount_total_output += o[1]
-                transaction.add_output(o[1], o[0])
+                raise WalletError("Output array must be a list of Output objects, not %s" % o)
 
         # Calculate fees
         srv = Service(network=network)
         transaction.fee = transaction_fee
         transaction.fee_per_kb = None
         fee_per_output = None
-        tr_size = 100 + (1 * 150) + (len(output_arr) + 1 * 50)
+        # TODO: move these numbers to settings
+        tr_size = 100 + (1 * 150) + (len(outputs) + 1 * 50)
         if transaction_fee is None:
-            if not input_arr:
+            if not inputs:
                 transaction.fee_per_kb = srv.estimatefee()
                 if transaction.fee_per_kb is False:
                     raise WalletError("Could not estimate transaction fees, please specify fees manually")
@@ -2363,7 +2377,7 @@ class HDWallet:
 
         # Add inputs
         amount_total_input = 0
-        if input_arr is None:
+        if inputs is None:
             utxo_query = self._session.query(DbTransactionOutput).join(DbTransaction).join(DbKey).\
                 filter(DbTransaction.wallet_id == self.wallet_id,
                        DbKey.account_id == account_id,
@@ -2373,36 +2387,39 @@ class HDWallet:
             utxos = utxo_query.all()
             if not utxos:
                 raise WalletError("Create transaction: No unspent transaction outputs found")
-            input_arr = []
+            inputs = []
             selected_utxos = self._select_inputs(amount_total_output + transaction.fee, utxo_query, max_utxos,
                                                  self.network.dust_amount)
             if not selected_utxos:
                 raise WalletError("Not enough unspent transaction outputs found")
             for utxo in selected_utxos:
                 amount_total_input += utxo.value
-                input_arr.append((utxo.transaction.hash, utxo.output_n, utxo.key_id, utxo.value, []))
+                # inputs.append((utxo.transaction.hash, utxo.output_n, utxo.key_id, utxo.value, []))
+                inputs.append(Input(utxo.transaction.hash, utxo.output_n, utxo.key_id, value=utxo.value,
+                                    network=network))
         else:
-            for i, inp in enumerate(input_arr):
-                # FIXME: Dirty stuff, please rewrite...
-                if isinstance(inp, Input):
-                    inp = (inp.prev_hash, inp.output_n, None, 0, inp.signatures, inp.unlocking_script)
+            for i, inp in enumerate(inputs):
+                # if isinstance(inp, Input):
+                #     inp = (inp.prev_hash, inp.output_n, None, 0, inp.signatures, inp.unlocking_script)
                 # Get key_ids, value from Db if not specified
-                if not (inp[2] or inp[3]):
+                if not (inp.key_id or inp.value):
                     inp_utxo = self._session.query(DbTransactionOutput).join(DbTransaction).join(DbKey). \
                         filter(DbTransaction.wallet_id == self.wallet_id,
-                               DbTransaction.hash == to_hexstring(inp[0]),
-                               DbTransactionOutput.output_n == struct.unpack('>I', inp[1])[0]).first()
+                               DbTransaction.hash == to_hexstring(inp.prev_hash),
+                               DbTransactionOutput.output_n == struct.unpack('>I', inp.output_n_int)[0]).first()
                     if not inp_utxo:
                         raise WalletError("UTXO %s not found in this wallet. Please update UTXO's" %
-                                          to_hexstring(inp[0]))
-                    input_arr[i] = (inp[0], inp[1], inp_utxo.key_id, inp_utxo.value)
+                                          to_hexstring(inp.prev_hash))
+                    # inputs[i] = (inp[0], inp[1], inp_utxo.key_id, inp_utxo.value)
+                    inputs[i].key_id = inp_utxo.key_id
+                    inputs[i].value = inp_utxo.value
                     amount_total_input = inp_utxo.value
                 else:
-                    amount_total_input += inp[3]
-                if len(inp) > 4:
-                    input_arr[i] += (inp[4],)
-                if len(inp) > 5:
-                    input_arr[i] += (inp[5],)
+                    amount_total_input += inp.value
+                # if len(inp) > 4:
+                #     inputs[i] += (inp[4],)
+                # if len(inp) > 5:
+                #     inputs[i] += (inp[5],)
 
         if transaction_fee is False:
             transaction.change = 0
@@ -2427,8 +2444,8 @@ class HDWallet:
         # if (amount_total_input - amount_total_output) > tr_size * MAXIMUM_FEE_PER_KB
 
         # Add inputs
-        for inp in input_arr:
-            key = self._session.query(DbKey).filter_by(id=inp[2]).scalar()
+        for inp in inputs:
+            key = self._session.query(DbKey).filter_by(id=inp.key_id).scalar()
             if not key:
                 raise WalletError("Key '%s' not found in this wallet" % inp[2])
             if key.key_type == 'multisig':

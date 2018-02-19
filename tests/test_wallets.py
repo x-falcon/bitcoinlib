@@ -467,9 +467,10 @@ class TestWalletMultisig(unittest.TestCase):
         msw1.utxos_update()
         msw2.utxos_update()
         utxos = msw1.utxos()
-        output_arr = [('21KnydRNSmqAf8Py74mMiwRXYHGxW27zyDu', utxos[0]['value'] - 50000)]
-        input_arr = [(utxos[0]['tx_hash'], utxos[0]['output_n'], utxos[0]['key_id'], utxos[0]['value'])]
-        t = msw1.transaction_create(output_arr, input_arr, transaction_fee=50000)
+        outputs = [Output(utxos[0]['value'] - 50000, '21KnydRNSmqAf8Py74mMiwRXYHGxW27zyDu', network='bitcoinlib_test')]
+        inputs = [Input(utxos[0]['tx_hash'], utxos[0]['output_n'], utxos[0]['key_id'], value=utxos[0]['value'],
+                        network='bitcoinlib_test')]
+        t = msw1.transaction_create(outputs, inputs, transaction_fee=50000)
         t.sign()
         t2 = msw2.transaction_import(t.raw())
         t2.sign()
