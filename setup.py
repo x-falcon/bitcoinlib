@@ -35,7 +35,7 @@ install_requires = [
       'requests>=2.20.0',
       'ecdsa==0.13',
       'pyaes==1.6.1',
-      'pyscrypt==1.6.2',
+      'scrypt==0.8.6',
       'SQLAlchemy>=1.2.12'
 ]
 if sys.version_info < (3, 4):
@@ -44,7 +44,7 @@ kwargs['install_requires'] = install_requires
 
 setup(
       name='bitcoinlib',
-      version='0.4.3',
+      version='0.4.4',
       description='Bitcoin and Other cryptocurrency Library',
       long_description=readmetxt,
       classifiers=[
